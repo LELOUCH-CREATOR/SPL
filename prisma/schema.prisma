@@ -1,0 +1,337 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  PRINCIPAL
+  TEACHER
+  HOMEROOM
+  PARENT
+  STUDENT
+}
+
+enum SchoolStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  SUSPENDED
+  GRADUATED
+}
+
+enum PairingMethod {
+  ADMIN
+  CODE
+  QR
+}
+
+enum ExamStatus {
+  PENDING
+  SUBMITTED
+  GRADED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique
+  password_hash String?
+  name          String?
+  role          Role?
+  school_id     String?  @db.Uuid
+  verified      Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  school School? @relation(fields: [school_id], references: [id])
+
+  // Relations
+  homeroom_classes    Class[]             @relation("HomeroomTeacher")
+  teacher_assignments TeacherAssignment[]
+  created_exams       Exam[]
+  grades_given        GradeRecord[]
+  messages_sent       Message[]           @relation("MessageFrom")
+  messages_received   Message[]           @relation("MessageTo")
+  issued_certificates Certificate[]
+  created_events      Event[]
+  audit_logs          AuditLog[]
+  parent_links        ParentStudentLink[] @relation("Parent")
+  recorded_attendance AttendanceRecord[]
+
+  @@map("users")
+}
+
+model School {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  school_code String       @unique
+  domain      String?
+  status      SchoolStatus @default(PENDING)
+  created_at  DateTime     @default(now()) @db.Timestamptz(6)
+
+  users    User[]
+  grades   Grade[]
+  subjects Subject[]
+  students Student[]
+  events   Event[]
+  messages    Message[]
+  invitations Invitation[]
+
+  @@map("schools")
+}
+
+model Grade {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  school_id String? @db.Uuid
+  name      String
+
+  school  School? @relation(fields: [school_id], references: [id])
+  classes Class[]
+
+  @@map("grades")
+}
+
+model Class {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  grade_id            String? @db.Uuid
+  name                String?
+  homeroom_teacher_id String? @db.Uuid
+
+  grade            Grade? @relation(fields: [grade_id], references: [id])
+  homeroom_teacher User?  @relation("HomeroomTeacher", fields: [homeroom_teacher_id], references: [id])
+
+  students            Student[]
+  teacher_assignments TeacherAssignment[]
+  exams               Exam[]
+  messages            Message[]
+  attendance          AttendanceRecord[]
+
+  @@map("classes")
+}
+
+model Subject {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  school_id String? @db.Uuid
+  name      String?
+
+  school School? @relation(fields: [school_id], references: [id])
+
+  teacher_assignments TeacherAssignment[]
+  exams               Exam[]
+  grades_records      GradeRecord[]
+
+  @@map("subjects")
+}
+
+model TeacherAssignment {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teacher_id String? @db.Uuid
+  class_id   String? @db.Uuid
+  subject_id String? @db.Uuid
+
+  teacher User?    @relation(fields: [teacher_id], references: [id])
+  class   Class?   @relation(fields: [class_id], references: [id])
+  subject Subject? @relation(fields: [subject_id], references: [id])
+
+  @@map("teacher_assignments")
+}
+
+model Student {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  school_id         String?           @db.Uuid
+  class_id          String?           @db.Uuid
+  student_code      String?           @unique
+  name              String            // Added field for Name
+  dob               DateTime?         @db.Date
+  enrollment_status EnrollmentStatus?
+
+  school School? @relation(fields: [school_id], references: [id])
+  class  Class?  @relation(fields: [class_id], references: [id])
+
+  parent_links  ParentStudentLink[]
+  exam_attempts ExamAttempt[]
+  grades        GradeRecord[]
+  certificates  Certificate[]
+  attendance    AttendanceRecord[]
+
+  @@map("students")
+}
+
+model ParentStudentLink {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parent_id      String?        @db.Uuid
+  student_id     String?        @db.Uuid
+  verified_at    DateTime?      @db.Timestamptz(6)
+  pairing_method PairingMethod?
+
+  parent  User?    @relation("Parent", fields: [parent_id], references: [id])
+  student Student? @relation(fields: [student_id], references: [id])
+
+  @@map("parent_student_links")
+}
+
+model Exam {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  class_id       String?   @db.Uuid
+  subject_id     String?   @db.Uuid
+  created_by     String?   @db.Uuid
+  available_from DateTime? @db.Timestamptz(6)
+  due_at         DateTime? @db.Timestamptz(6)
+  duration       Int? // in minutes
+  config         Json?
+
+  class   Class?   @relation(fields: [class_id], references: [id])
+  subject Subject? @relation(fields: [subject_id], references: [id])
+  creator User?    @relation(fields: [created_by], references: [id])
+
+  attempts      ExamAttempt[]
+  grades_records GradeRecord[]
+
+  @@map("exams")
+}
+
+model ExamAttempt {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  exam_id      String?     @db.Uuid
+  student_id   String?     @db.Uuid
+  started_at   DateTime?   @db.Timestamptz(6)
+  submitted_at DateTime?   @db.Timestamptz(6)
+  score        Decimal?    @db.Decimal
+  answers      Json?
+  status       ExamStatus?
+
+  exam    Exam?    @relation(fields: [exam_id], references: [id])
+  student Student? @relation(fields: [student_id], references: [id])
+
+  @@map("exam_attempts")
+}
+
+model GradeRecord {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  student_id String?  @db.Uuid
+  subject_id String?  @db.Uuid
+  exam_id    String?  @db.Uuid
+  score      Decimal? @db.Decimal
+  created_by String?  @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  student Student? @relation(fields: [student_id], references: [id])
+  subject Subject? @relation(fields: [subject_id], references: [id])
+  exam    Exam?    @relation(fields: [exam_id], references: [id])
+  grader  User?    @relation(fields: [created_by], references: [id])
+
+  @@map("grades_records")
+}
+
+model AttendanceRecord {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  student_id String?          @db.Uuid
+  class_id   String?          @db.Uuid
+  date       DateTime         @db.Date
+  status     AttendanceStatus @default(PRESENT)
+  created_by String?          @db.Uuid
+  created_at DateTime         @default(now()) @db.Timestamptz(6)
+
+  student Student? @relation(fields: [student_id], references: [id])
+  class   Class?   @relation(fields: [class_id], references: [id])
+  recorder User?   @relation(fields: [created_by], references: [id])
+
+  @@unique([student_id, date, class_id]) // Ensure one record per student per day per class
+  @@map("attendance_records")
+}
+
+model Message {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_user_id String?  @db.Uuid
+  to_user_id   String?  @db.Uuid
+  class_id     String?  @db.Uuid
+  school_id    String?  @db.Uuid
+  content      String?
+  attachments  Json?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  from_user User?   @relation("MessageFrom", fields: [from_user_id], references: [id])
+  to_user   User?   @relation("MessageTo", fields: [to_user_id], references: [id])
+  class     Class?  @relation(fields: [class_id], references: [id])
+  school    School? @relation(fields: [school_id], references: [id])
+
+  @@map("messages")
+}
+
+model Certificate {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  student_id String?  @db.Uuid
+  issued_by  String?  @db.Uuid
+  type       String?
+  pdf_url    String?
+  issued_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  student Student? @relation(fields: [student_id], references: [id])
+  issuer  User?    @relation(fields: [issued_by], references: [id])
+
+  @@map("certificates")
+}
+
+model Event {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  school_id   String?   @db.Uuid
+  title       String?
+  description String?
+  event_date  DateTime? @db.Timestamptz(6)
+  created_by  String?   @db.Uuid
+
+  school  School? @relation(fields: [school_id], references: [id])
+  creator User?   @relation(fields: [created_by], references: [id])
+
+  @@map("events")
+}
+
+model AuditLog {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String?  @db.Uuid
+  action        String?
+  resource_type String?
+  resource_id   String?  @db.Uuid
+  before        Json?
+  after         Json?
+  ip            String?
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  user User? @relation(fields: [user_id], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Invitation {
+  id         String   @id @default(uuid())
+  school_id  String
+  school     School   @relation(fields: [school_id], references: [id])
+  email      String?
+  role       UserRole
+  code       String   @unique
+  status     String   @default("PENDING") // PENDING, USED, EXPIRED
+  created_at DateTime @default(now())
+  expires_at DateTime?
+  
+  @@index([school_id])
+  @@map("invitations")
+}

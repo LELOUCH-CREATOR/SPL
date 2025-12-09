@@ -51,6 +51,24 @@ enum AttendanceStatus {
   EXCUSED
 }
 
+enum LiveSessionType {
+  WHITEBOARD
+  QUIZ
+  POLL
+}
+
+enum LiveSessionStatus {
+  ACTIVE
+  ENDED
+}
+
+enum ConferenceStatus {
+  AVAILABLE
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
 model User {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email         String   @unique
@@ -63,6 +81,8 @@ model User {
   updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   school School? @relation(fields: [school_id], references: [id])
+  
+  @@index([school_id])
 
   // Relations
   homeroom_classes    Class[]             @relation("HomeroomTeacher")
@@ -76,6 +96,11 @@ model User {
   audit_logs          AuditLog[]
   parent_links        ParentStudentLink[] @relation("Parent")
   recorded_attendance AttendanceRecord[]
+  badges              UserBadge[]
+  notifications       Notification[]
+  live_sessions       LiveSession[]
+  teacher_conferences ConferenceSlot[]    @relation("TeacherConferences")
+  parent_conferences  ConferenceSlot[]    @relation("ParentConferences")
 
   @@map("users")
 }
@@ -92,7 +117,8 @@ model School {
   grades   Grade[]
   subjects Subject[]
   students Student[]
-  events   Event[]
+  events      Event[]
+  badges      Badge[]
   messages    Message[]
   invitations Invitation[]
 
@@ -124,6 +150,7 @@ model Class {
   exams               Exam[]
   messages            Message[]
   attendance          AttendanceRecord[]
+  live_sessions       LiveSession[]
 
   @@map("classes")
 }
@@ -139,6 +166,7 @@ model Subject {
   exams               Exam[]
   grades_records      GradeRecord[]
 
+  @@index([school_id])
   @@map("subjects")
 }
 
@@ -152,6 +180,9 @@ model TeacherAssignment {
   class   Class?   @relation(fields: [class_id], references: [id])
   subject Subject? @relation(fields: [subject_id], references: [id])
 
+  @@index([teacher_id])
+  @@index([class_id])
+  @@index([subject_id])
   @@map("teacher_assignments")
 }
 
@@ -172,7 +203,11 @@ model Student {
   grades        GradeRecord[]
   certificates  Certificate[]
   attendance    AttendanceRecord[]
+  quiz_results  QuizResult[]
+  conference_slots ConferenceSlot[]
 
+  @@index([school_id])
+  @@index([class_id])
   @@map("students")
 }
 
@@ -206,6 +241,8 @@ model Exam {
   attempts      ExamAttempt[]
   grades_records GradeRecord[]
 
+  @@index([class_id])
+  @@index([subject_id])
   @@map("exams")
 }
 
@@ -221,6 +258,8 @@ model ExamAttempt {
 
   exam    Exam?    @relation(fields: [exam_id], references: [id])
   student Student? @relation(fields: [student_id], references: [id])
+
+  audit_logs ExamAudit[]
 
   @@map("exam_attempts")
 }
@@ -239,6 +278,9 @@ model GradeRecord {
   exam    Exam?    @relation(fields: [exam_id], references: [id])
   grader  User?    @relation(fields: [created_by], references: [id])
 
+  @@index([student_id])
+  @@index([subject_id])
+  @@index([exam_id])
   @@map("grades_records")
 }
 
@@ -256,6 +298,9 @@ model AttendanceRecord {
   recorder User?   @relation(fields: [created_by], references: [id])
 
   @@unique([student_id, date, class_id]) // Ensure one record per student per day per class
+  @@index([student_id])
+  @@index([class_id])
+  @@index([date])
   @@map("attendance_records")
 }
 
@@ -274,6 +319,10 @@ model Message {
   class     Class?  @relation(fields: [class_id], references: [id])
   school    School? @relation(fields: [school_id], references: [id])
 
+  @@index([class_id])
+  @@index([school_id])
+  @@index([from_user_id])
+  @@index([to_user_id])
   @@map("messages")
 }
 
@@ -302,6 +351,7 @@ model Event {
   school  School? @relation(fields: [school_id], references: [id])
   creator User?   @relation(fields: [created_by], references: [id])
 
+  @@index([school_id])
   @@map("events")
 }
 
@@ -323,10 +373,10 @@ model AuditLog {
 
 model Invitation {
   id         String   @id @default(uuid())
-  school_id  String
+  school_id  String   @db.Uuid
   school     School   @relation(fields: [school_id], references: [id])
   email      String?
-  role       UserRole
+  role       Role
   code       String   @unique
   status     String   @default("PENDING") // PENDING, USED, EXPIRED
   created_at DateTime @default(now())
@@ -334,4 +384,120 @@ model Invitation {
   
   @@index([school_id])
   @@map("invitations")
+}
+
+model Badge {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  school_id   String?  @db.Uuid
+  name        String
+  description String?
+  icon        String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  school School? @relation(fields: [school_id], references: [id])
+  users  UserBadge[]
+
+  @@index([school_id])
+  @@map("badges")
+}
+
+model UserBadge {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String?  @db.Uuid
+  badge_id   String?  @db.Uuid
+  awarded_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User?  @relation(fields: [user_id], references: [id])
+  badge Badge? @relation(fields: [badge_id], references: [id])
+
+  @@index([user_id])
+  @@index([badge_id])
+  @@map("user_badges")
+}
+
+model Notification {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?  @db.Uuid
+  title       String
+  message     String
+  type        String   @default("INFO") // INFO, ALERT, SUCCESS, WARNING
+  read        Boolean  @default(false)
+  link        String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user User? @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@map("notifications")
+}
+
+model ExamAudit {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  exam_attempt_id String?  @db.Uuid
+  event_type      String   // TAB_SWITCH, FOCUS_LOST, FULLSCREEN_EXIT, ETC
+  details         Json?
+  timestamp       DateTime @default(now()) @db.Timestamptz(6)
+
+  exam_attempt ExamAttempt? @relation(fields: [exam_attempt_id], references: [id])
+
+  @@index([exam_attempt_id])
+  @@map("exam_audits")
+}
+
+model LiveSession {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  class_id           String?           @db.Uuid
+  teacher_id         String?           @db.Uuid
+  type               LiveSessionType
+  status             LiveSessionStatus @default(ACTIVE)
+  active_resource_id String?           // ID of the quiz/exam being hosted
+  config             Json?             // Settings like "allow_chat", "draw_color"
+  started_at         DateTime          @default(now()) @db.Timestamptz(6)
+  ended_at           DateTime?         @db.Timestamptz(6)
+
+  class   Class? @relation(fields: [class_id], references: [id])
+  teacher User?  @relation(fields: [teacher_id], references: [id])
+  
+  quiz_results QuizResult[]
+
+  @@index([class_id])
+  @@index([status])
+  @@map("live_sessions")
+}
+
+model QuizResult {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id  String?  @db.Uuid
+  student_id  String?  @db.Uuid
+  score       Decimal? @db.Decimal
+  answers     Json?
+  submitted_at DateTime @default(now()) @db.Timestamptz(6)
+
+  session LiveSession? @relation(fields: [session_id], references: [id])
+  student Student?     @relation(fields: [student_id], references: [id])
+
+  @@index([session_id])
+  @@map("quiz_results")
+}
+
+model ConferenceSlot {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teacher_id   String?          @db.Uuid
+  parent_id    String?          @db.Uuid
+  student_id   String?          @db.Uuid
+  
+  start_time   DateTime         @db.Timestamptz(6)
+  end_time     DateTime         @db.Timestamptz(6)
+  status       ConferenceStatus @default(AVAILABLE)
+  meeting_link String?
+  created_at   DateTime         @default(now()) @db.Timestamptz(6)
+
+  teacher User?    @relation("TeacherConferences", fields: [teacher_id], references: [id])
+  parent  User?    @relation("ParentConferences", fields: [parent_id], references: [id])
+  student Student? @relation(fields: [student_id], references: [id])
+
+  @@index([teacher_id])
+  @@index([parent_id])
+  @@index([start_time])
+  @@map("conference_slots")
 }

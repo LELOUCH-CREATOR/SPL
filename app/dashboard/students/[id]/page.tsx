@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase-server'
-import { GraduationCap, Timer, Award, TrendingUp, Calendar, MapPin, Mail, Phone, ArrowLeft, MoreHorizontal } from 'lucide-react'
+import { GraduationCap, Timer, Award, TrendingUp, Calendar, MapPin, Mail, Phone, ArrowLeft, MoreHorizontal, Medal } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { getBadges } from '@/app/actions/gamification'
+import { BadgeDisplay } from '@/components/BadgeDisplay'
 
 export default async function StudentProfilePage(props: { params: Promise<{ id: string }> }) {
     const params = await props.params
@@ -23,12 +25,14 @@ export default async function StudentProfilePage(props: { params: Promise<{ id: 
         { data: attendance },
         { data: grades },
         { data: certificates },
-        { count: examCount }
+        { count: examCount },
+        badges
     ] = await Promise.all([
         supabase.from('attendance_records').select('status').eq('student_id', student.id),
         supabase.from('grades_records').select('*, subject:subjects(name), exam:exams(available_from)').order('created_at', { ascending: false }).limit(5),
         supabase.from('certificates').select('*').eq('student_id', student.id).order('issued_at', { ascending: false }),
-        supabase.from('exam_attempts').select('*', { count: 'exact', head: true }).eq('student_id', student.id)
+        supabase.from('exam_attempts').select('*', { count: 'exact', head: true }).eq('student_id', student.id),
+        getBadges(student.id)
     ])
 
     // Calc Attendance
@@ -106,8 +110,8 @@ export default async function StudentProfilePage(props: { params: Promise<{ id: 
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
                     <div className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Awards</div>
                     <div className="flex items-end gap-2">
-                        <span className="text-3xl font-black text-amber-500">{certificates?.length || 0}</span>
-                        <span className="text-xs text-slate-400 mb-1.5 font-medium">certificates</span>
+                        <span className="text-3xl font-black text-amber-500">{badges?.length || 0}</span>
+                        <span className="text-xs text-slate-400 mb-1.5 font-medium">badges</span>
                     </div>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -157,28 +161,44 @@ export default async function StudentProfilePage(props: { params: Promise<{ id: 
                     </table>
                 </div>
 
-                {/* Certificates List */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="p-6 border-b border-slate-50">
-                        <h3 className="font-bold text-slate-800">Certificates & Awards</h3>
+                {/* Badges & Certificates */}
+                <div className="space-y-8">
+                    {/* Badges */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
+                        <div className="p-6 border-b border-slate-50">
+                            <h3 className="font-bold text-slate-800 flex items-center">
+                                <Medal className="w-5 h-5 mr-2 text-yellow-500" />
+                                Badges Earned
+                            </h3>
+                        </div>
+                        <div className="p-6">
+                            <BadgeDisplay badges={badges as any} />
+                        </div>
                     </div>
-                    <div className="p-6 space-y-4">
-                        {certificates?.map((cert) => (
-                            <div key={cert.id} className="flex items-center gap-4 group">
-                                <div className="h-10 w-10 bg-amber-50 rounded-full flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
-                                    <Award className="w-5 h-5" />
+
+                    {/* Certificates List */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
+                        <div className="p-6 border-b border-slate-50">
+                            <h3 className="font-bold text-slate-800">Certificates & Awards</h3>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            {certificates?.map((cert) => (
+                                <div key={cert.id} className="flex items-center gap-4 group">
+                                    <div className="h-10 w-10 bg-amber-50 rounded-full flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
+                                        <Award className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-slate-900 text-sm">{cert.type}</div>
+                                        <div className="text-xs text-slate-500">{new Date(cert.issued_at).toLocaleDateString()}</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <div className="font-bold text-slate-900 text-sm">{cert.type}</div>
-                                    <div className="text-xs text-slate-500">{new Date(cert.issued_at).toLocaleDateString()}</div>
+                            ))}
+                            {(!certificates || certificates.length === 0) && (
+                                <div className="text-center py-6 text-slate-400 text-sm">
+                                    No certificates yet.
                                 </div>
-                            </div>
-                        ))}
-                        {(!certificates || certificates.length === 0) && (
-                            <div className="text-center py-6 text-slate-400 text-sm">
-                                No certificates yet.
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
